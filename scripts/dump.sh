@@ -176,8 +176,9 @@ else
     > "$DUMP_FILE"
 fi
 
+# shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
 TABLES=($(mysql $MYSQL_OPTS -N -e \
-  "SELECT table_name FROM information_schema.tables WHERE table_schema='$DB_NAME';"))
+  "SELECT table_name FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_type='BASE TABLE';"))
 
 TOTAL_TABLES=${#TABLES[@]}
 CURRENT=0
@@ -195,7 +196,7 @@ for t in "${TABLES[@]}"; do
 
     if [ -z "$RECORD_LIMIT" ] || is_selected_table "$t"; then
         echo "[$CURRENT/$TOTAL_TABLES] Dumping table (full): $t"
-        
+        # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
         if mysqldump $MYSQL_OPTS $DB_NAME $t \
             --single-transaction \
             --quick \
@@ -211,7 +212,7 @@ for t in "${TABLES[@]}"; do
         fi
     else
         echo "[$CURRENT/$TOTAL_TABLES] Dumping table (latest $RECORD_LIMIT): $t"
-        
+        # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
         if ! mysqldump $MYSQL_OPTS $DB_NAME $t \
             --single-transaction \
             --no-data \
@@ -220,7 +221,7 @@ for t in "${TABLES[@]}"; do
             echo "Error dumping $t structure. Restart script to resume."
             exit 1
         fi
-        
+        # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
         if mysqldump $MYSQL_OPTS $DB_NAME $t \
             --single-transaction \
             --no-create-info \
