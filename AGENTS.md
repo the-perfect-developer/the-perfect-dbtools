@@ -14,11 +14,26 @@ dbtools/
 ├── scripts/
 │   ├── dump.sh          # Database dump command
 │   ├── restore.sh       # Database restore command
+│   ├── update.sh        # Self-update command
 │   └── <new>.sh         # New tools go here
+├── tests/
+│   └── run-tests.sh     # No-DB test suite (run locally and in CI)
+├── .githooks/           # Versioned git hooks (install with install-hooks.sh)
+│   ├── pre-commit
+│   ├── commit-msg
+│   ├── pre-push
+│   └── README.md
+├── .github/
+│   └── workflows/
+│       └── ci.yml       # CI pipeline (ShellCheck, shfmt, tests, security)
+├── install-hooks.sh     # One-command hook setup for contributors
+├── install.sh           # Local system installer
+├── get.sh               # Remote curl installer
+├── CONTRIBUTING.md      # Contribution guidelines
+├── TODO.md              # Planned features and improvements
 ├── .gitignore
 ├── LICENSE              # GPL-3.0
 ├── README.md
-├── SKILL.md             # Detailed guide for adding new tools
 └── AGENTS.md            # This file
 ```
 
@@ -31,6 +46,13 @@ dbtools/
 # Test specific command help
 ./dbtools.sh dump --help
 ./dbtools.sh restore --help
+./dbtools.sh update --help
+
+# Test version output
+./dbtools.sh --version
+
+# Test unknown command handling
+./dbtools.sh unknowncommand 2>&1 | grep -q "Unknown command"
 
 # Test dump (requires MySQL connection)
 ./dbtools.sh dump -u root -d testdb
@@ -42,9 +64,18 @@ dbtools/
 bash -n dbtools.sh
 bash -n scripts/dump.sh
 bash -n scripts/restore.sh
+bash -n scripts/update.sh
+bash -n install.sh
+bash -n get.sh
+
+# Run full no-DB test suite (no MySQL needed)
+bash tests/run-tests.sh
 
 # Make scripts executable after creation
 chmod +x scripts/<new_script>.sh
+
+# Set up git hooks (one-time, after cloning)
+./install-hooks.sh
 ```
 
 ## Code Style Guidelines
@@ -189,7 +220,25 @@ pv -s $FILE_SIZE "$SQL_FILE" | mysql $MYSQL_OPTS "$DB_NAME"
 4. Test with `./dbtools.sh <name> --help`
 5. Update README.md
 
-See `SKILL.md` for complete template and examples.
+## Git Hooks
+
+Hooks are version-controlled in `.githooks/`. Set them up once after cloning:
+
+```bash
+./install-hooks.sh
+```
+
+| Hook | When | What it checks |
+|---|---|---|
+| `pre-commit` | On `git commit` | ShellCheck, syntax, shfmt, @description annotation on staged `.sh` files |
+| `commit-msg` | On `git commit` | Conventional Commits format (feat/fix/docs/chore/etc.) |
+| `pre-push` | On `git push` | Full no-DB test suite (`tests/run-tests.sh`) |
+
+Commit message format: `<type>[scope]: <description>`
+Valid types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `style`, `ci`, `perf`, `build`, `revert`
+
+To check hook status: `./install-hooks.sh --check`
+To uninstall hooks: `./install-hooks.sh --uninstall`
 
 ## Files to Ignore
 

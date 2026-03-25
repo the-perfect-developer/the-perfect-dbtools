@@ -36,3 +36,7 @@
 bun.lock
 package.json
 node_modules
+/skills/bash-shell
+/skills/git-hooks
+/skills/github-actions
+/skills/markdown

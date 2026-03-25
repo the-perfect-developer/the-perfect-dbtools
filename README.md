@@ -1,4 +1,4 @@
-# the-perfect-dbtools
+# perfect-db-tools
 
 ```
      _ _     _              _     
@@ -14,7 +14,8 @@ By Dilan D Chandrajith - The Perfect Developer
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Bash](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
 [![MySQL](https://img.shields.io/badge/Database-MySQL-orange.svg)](https://www.mysql.com/)
-[![Maintenance](https://img.shields.io/badge/Maintained-yes-brightgreen.svg)](https://github.com/the-perfect-developer/the-perfect-dbtools/commits/main)
+[![Maintenance](https://img.shields.io/badge/Maintained-yes-brightgreen.svg)](https://github.com/the-perfect-developer/perfect-db-tools/commits/main)
+[![CI](https://github.com/the-perfect-developer/perfect-db-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/the-perfect-developer/perfect-db-tools/actions/workflows/ci.yml)
 
 Bash scripts for dumping and restoring MySQL databases with progress tracking and resume support.
 
@@ -47,7 +48,7 @@ brew install mysql-client pv
 ### Quick Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-perfect-developer/the-perfect-dbtools/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/the-perfect-developer/perfect-db-tools/main/get.sh | sudo bash
 ```
 
 This installs dbtools to `/opt/dbtools` and creates a symlink in `/usr/local/bin`.
@@ -63,7 +64,7 @@ sudo rm -rf /opt/dbtools /usr/local/bin/dbtools
 Clone the repository and install manually:
 
 ```bash
-git clone https://github.com/the-perfect-developer/the-perfect-dbtools.git
+git clone https://github.com/the-perfect-developer/perfect-db-tools.git
 cd the-perfect-dbtools
 sudo ./install.sh --install
 ```
@@ -124,7 +125,7 @@ Dump a MySQL database with optional table filtering.
 | `-P, --port` | Database port | 3306 |
 | `-d, --database` | Database name | (required) |
 | `-o, --output` | Output SQL file | `<database>.sql` |
-| `-l, --limit` | Max records per table for non-full tables | 500 |
+| `-l, --limit` | Max records per table for non-full tables | none (dumps all) |
 | `-t, --tables` | Comma-separated list of tables to dump fully | (none) |
 | `--help` | Show help message | |
 
@@ -191,6 +192,22 @@ Restore a MySQL database from a SQL file.
 2. Converts MySQL 8.0+ collations to compatible ones for older versions
 3. Imports the SQL file with progress display
 
+## Development Quality Checks
+
+After cloning, install git hooks with one command:
+
+```bash
+./install-hooks.sh
+```
+
+Hooks automatically run ShellCheck, syntax validation, conventional commit message linting, and the full test suite. See [.githooks/README.md](.githooks/README.md) for details.
+
+To check hook status:
+
+```bash
+./install-hooks.sh --check
+```
+
 ## Author
 
 **Dilan D Chandrajith** - [The Perfect Developer](https://github.com/the-perfect-developer)
@@ -198,3 +215,7 @@ Restore a MySQL database from a SQL file.
 ## License
 
 This project is licensed under the GNU General Public License v3.0 - see the [LICENSE](LICENSE) file for details.
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, coding conventions, and pull request expectations.

@@ -7,13 +7,52 @@ Thanks for your interest in contributing to dbtools! This document provides guid
 1. Fork the repository
 2. Clone your fork:
    ```bash
-   git clone https://github.com/YOUR_USERNAME/db_tools.git
+    git clone https://github.com/YOUR_USERNAME/perfect-db-tools.git
    cd db_tools
    ```
 3. Make scripts executable:
-   ```bash
-   chmod +x dbtools.sh scripts/*.sh
-   ```
+    ```bash
+    chmod +x dbtools.sh scripts/*.sh
+    ```
+
+## Setting Up Development Hooks
+
+After cloning, run the hook installer once:
+
+```bash
+./install-hooks.sh
+```
+
+This configures git to use the versioned hooks in `.githooks/`. No Node.js. No Python. Just bash.
+
+**What gets installed:**
+
+| Hook | When | What it does |
+|---|---|---|
+| `pre-commit` | On every `git commit` | ShellCheck + syntax check on staged `.sh` files |
+| `commit-msg` | On every `git commit` | Enforces Conventional Commits format |
+| `pre-push` | On `git push` | Full test suite before any code reaches remote |
+
+**Commit message format** (enforced by `commit-msg` hook):
+
+```
+<type>[optional scope]: <description>
+```
+
+Valid types: `feat`, `fix`, `docs`, `chore`, `refactor`, `test`, `style`, `ci`, `perf`, `build`, `revert`
+
+Examples:
+```bash
+git commit -m "feat: add schema-diff command"
+git commit -m "fix(restore): handle missing SQL file gracefully"
+git commit -m "docs: add Homebrew install instructions to README"
+git commit -m "ci: upgrade ShellCheck to error severity"
+```
+
+To check your hook installation status:
+```bash
+./install-hooks.sh --check
+```
 
 ## Project Structure
 
