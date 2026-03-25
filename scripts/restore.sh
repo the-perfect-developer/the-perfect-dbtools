@@ -120,10 +120,25 @@ fi
 
 FILE_SIZE=$(stat -c%s "$SQL_FILE" 2>/dev/null || stat -f%z "$SQL_FILE" 2>/dev/null)
 
+# Check for GTID statements and warn if present
+if grep -qE '^SET @@(GLOBAL\.GTID_PURGED|SESSION\.GTID_NEXT|SESSION\.SQL_LOG_BIN)|^SET @MYSQLDUMP_TEMP_LOG_BIN' "$SQL_FILE"; then
+    echo "⚠  Warning: Dump contains GTID/binary-log control statements."
+    echo "   These require SUPER or SYSTEM_VARIABLES_ADMIN privileges and"
+    echo "   are incompatible with servers that have GTID_MODE=OFF."
+    echo "   Stripping automatically for local restore compatibility."
+    echo ""
+fi
+
 echo "Importing data..."
-pv -s $FILE_SIZE "$SQL_FILE" | \
-    sed 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' | \
-    sed 's/utf8mb4_0900_as_cs/utf8mb4_bin/g' | \
+pv -s "$FILE_SIZE" "$SQL_FILE" | \
+    sed \
+        -e '/^SET @@GLOBAL\.GTID_PURGED/d' \
+        -e '/^\/\*!80000 SET @@GLOBAL\.GTID_PURGED/d' \
+        -e '/^SET @@SESSION\.GTID_NEXT/d' \
+        -e '/^SET @@SESSION\.SQL_LOG_BIN/d' \
+        -e '/^SET @MYSQLDUMP_TEMP_LOG_BIN/d' \
+        -e 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' \
+        -e 's/utf8mb4_0900_as_cs/utf8mb4_bin/g' | \
     mysql $MYSQL_OPTS "$DB_NAME"
 
 if [ $? -eq 0 ]; then

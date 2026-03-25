@@ -16,6 +16,45 @@ pass() { printf "  ${GREEN}✓${NC} %s\n" "$1"; ((PASS++)); }
 fail() { printf "  ${RED}✗${NC} %s\n" "$1"; ERRORS+=("$1"); ((FAIL++)); }
 section() { printf "\n${CYAN}── %s ──${NC}\n" "$1"; }
 
+# Helper: apply the restore.sh GTID-stripping sed pipeline directly
+# This must be kept in sync with the pipeline in scripts/restore.sh
+_gtid_strip() {
+    printf '%s' "$1" | sed \
+        -e '/^SET @@GLOBAL\.GTID_PURGED/d' \
+        -e '/^\/\*!80000 SET @@GLOBAL\.GTID_PURGED/d' \
+        -e '/^SET @@SESSION\.GTID_NEXT/d' \
+        -e '/^SET @@SESSION\.SQL_LOG_BIN/d' \
+        -e '/^SET @MYSQLDUMP_TEMP_LOG_BIN/d'
+}
+
+# assert_gtid_stripped: fail if pattern is still present after pipeline
+assert_gtid_stripped() {
+    local pattern=$1
+    local desc=$2
+    local input=$3
+    local result
+    result=$(_gtid_strip "$input")
+    if echo "$result" | grep -qF -- "$pattern"; then
+        fail "$desc (GTID line '$pattern' still present — not stripped)"
+    else
+        pass "$desc"
+    fi
+}
+
+# assert_gtid_preserved: fail if pattern is missing after pipeline (corruption check)
+assert_gtid_preserved() {
+    local pattern=$1
+    local desc=$2
+    local input=$3
+    local result
+    result=$(_gtid_strip "$input")
+    if echo "$result" | grep -qF -- "$pattern"; then
+        pass "$desc"
+    else
+        fail "$desc (line '$pattern' missing after pipeline — adjacent SQL was corrupted)"
+    fi
+}
+
 assert_exit() {
     local expected_exit=$1
     local desc=$2
@@ -156,6 +195,73 @@ assert_exit_and_output 1 "--user, --database, and --file are required" "arg chec
 section "restore.sh unknown flags"
 assert_exit_and_output 1 "Unknown option" "unknown long flag" "$RESTORE" --nonexistent
 assert_exit_and_output 1 "Unknown option" "unknown short flag" "$RESTORE" -Z
+
+section "restore.sh GTID stripping - MySQL 5.7 single-line"
+
+GTID_57_SINGLE="SET @@GLOBAL.GTID_PURGED='3E11FA47-71CA-11E1-9E33-C80AA9429562:1-5';
+CREATE TABLE \`users\` (\`id\` int NOT NULL, PRIMARY KEY (\`id\`));
+INSERT INTO \`users\` VALUES (1),(2);"
+
+assert_gtid_stripped "GTID_PURGED" \
+    "MySQL 5.7 single-line GTID_PURGED is stripped" \
+    "$GTID_57_SINGLE"
+assert_gtid_preserved "CREATE TABLE" \
+    "CREATE TABLE after GTID_PURGED is preserved" \
+    "$GTID_57_SINGLE"
+assert_gtid_preserved "INSERT INTO" \
+    "INSERT after GTID_PURGED is preserved" \
+    "$GTID_57_SINGLE"
+
+section "restore.sh GTID stripping - MySQL 8 versioned comment format"
+
+GTID_80="SET @MYSQLDUMP_TEMP_LOG_BIN = @@SESSION.SQL_LOG_BIN;
+SET @@SESSION.SQL_LOG_BIN= 0;
+/*!80000 SET @@GLOBAL.GTID_PURGED=/*!*/;
+SET @@SESSION.SQL_LOG_BIN = @MYSQLDUMP_TEMP_LOG_BIN;
+CREATE TABLE \`products\` (\`id\` int NOT NULL);"
+
+assert_gtid_stripped "GTID_PURGED" \
+    "MySQL 8 versioned comment GTID_PURGED line is stripped" \
+    "$GTID_80"
+assert_gtid_stripped "MYSQLDUMP_TEMP_LOG_BIN" \
+    "MYSQLDUMP_TEMP_LOG_BIN temp variable lines are stripped" \
+    "$GTID_80"
+assert_gtid_stripped "SQL_LOG_BIN= 0" \
+    "SET @@SESSION.SQL_LOG_BIN=0 is stripped" \
+    "$GTID_80"
+assert_gtid_preserved "CREATE TABLE" \
+    "CREATE TABLE after MySQL 8 GTID block is preserved" \
+    "$GTID_80"
+
+section "restore.sh GTID stripping - GTID_NEXT per-statement"
+
+GTID_NEXT="SET @@SESSION.GTID_NEXT= 'AUTOMATIC';
+INSERT INTO \`log\` VALUES (42, 'event');"
+
+assert_gtid_stripped "GTID_NEXT" \
+    "SET @@SESSION.GTID_NEXT is stripped" \
+    "$GTID_NEXT"
+assert_gtid_preserved "INSERT INTO" \
+    "INSERT after GTID_NEXT is preserved" \
+    "$GTID_NEXT"
+
+section "restore.sh GTID stripping - clean dump passthrough (no GTID)"
+
+CLEAN_DUMP="-- MySQL dump 10.13
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+CREATE TABLE \`events\` (\`id\` int NOT NULL, \`name\` varchar(255));
+INSERT INTO \`events\` VALUES (1,'deploy'),(2,'rollback');
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;"
+
+assert_gtid_preserved "CREATE TABLE" \
+    "Clean dump: CREATE TABLE is preserved unchanged" \
+    "$CLEAN_DUMP"
+assert_gtid_preserved "INSERT INTO" \
+    "Clean dump: INSERT is preserved unchanged" \
+    "$CLEAN_DUMP"
+assert_gtid_preserved "CHARACTER_SET_CLIENT" \
+    "Clean dump: other SET statements are preserved unchanged" \
+    "$CLEAN_DUMP"
 
 section "update.sh help and unknown flags"
 assert_exit 0 "--help exits 0" "$UPDATE" --help

@@ -196,15 +196,16 @@ for t in "${TABLES[@]}"; do
 
     if [ -z "$RECORD_LIMIT" ] || is_selected_table "$t"; then
         echo "[$CURRENT/$TOTAL_TABLES] Dumping table (full): $t"
-        # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
-        if mysqldump $MYSQL_OPTS $DB_NAME $t \
-            --single-transaction \
-            --quick \
-            --routines \
-            --triggers \
-            --events \
-            --no-tablespaces \
-            2>/dev/null | pv -N "$t" >> "$DUMP_FILE"; then
+         # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
+         if mysqldump $MYSQL_OPTS $DB_NAME $t \
+             --single-transaction \
+             --quick \
+             --routines \
+             --triggers \
+             --events \
+             --no-tablespaces \
+             --set-gtid-purged=OFF \
+             2>/dev/null | pv -N "$t" >> "$DUMP_FILE"; then
             mark_table_done "$t"
         else
             echo "Error dumping $t. Restart script to resume."
@@ -212,22 +213,24 @@ for t in "${TABLES[@]}"; do
         fi
     else
         echo "[$CURRENT/$TOTAL_TABLES] Dumping table (latest $RECORD_LIMIT): $t"
-        # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
-        if ! mysqldump $MYSQL_OPTS $DB_NAME $t \
-            --single-transaction \
-            --no-data \
-            --no-tablespaces \
-            2>/dev/null >> "$DUMP_FILE"; then
+         # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
+         if ! mysqldump $MYSQL_OPTS $DB_NAME $t \
+             --single-transaction \
+             --no-data \
+             --no-tablespaces \
+             --set-gtid-purged=OFF \
+             2>/dev/null >> "$DUMP_FILE"; then
             echo "Error dumping $t structure. Restart script to resume."
             exit 1
         fi
-        # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
-        if mysqldump $MYSQL_OPTS $DB_NAME $t \
-            --single-transaction \
-            --no-create-info \
-            --no-tablespaces \
-            --where="1=1 ORDER BY 1 DESC LIMIT $RECORD_LIMIT" \
-            2>/dev/null | pv -N "$t" >> "$DUMP_FILE"; then
+         # shellcheck disable=SC2086 # TODO: convert MYSQL_OPTS to array
+         if mysqldump $MYSQL_OPTS $DB_NAME $t \
+             --single-transaction \
+             --no-create-info \
+             --no-tablespaces \
+             --set-gtid-purged=OFF \
+             --where="1=1 ORDER BY 1 DESC LIMIT $RECORD_LIMIT" \
+             2>/dev/null | pv -N "$t" >> "$DUMP_FILE"; then
             mark_table_done "$t"
         else
             echo "Error dumping $t data. Restart script to resume."
