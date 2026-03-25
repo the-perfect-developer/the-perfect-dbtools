@@ -16,16 +16,23 @@ pass() { printf "  ${GREEN}✓${NC} %s\n" "$1"; ((PASS++)); }
 fail() { printf "  ${RED}✗${NC} %s\n" "$1"; ERRORS+=("$1"); ((FAIL++)); }
 section() { printf "\n${CYAN}── %s ──${NC}\n" "$1"; }
 
-# Helper: apply the restore.sh GTID-stripping sed pipeline directly
+# Helper: apply the restore.sh GTID-stripping awk|sed pipeline directly
 # This must be kept in sync with the pipeline in scripts/restore.sh
 _gtid_strip() {
-    printf '%s' "$1" | sed \
-        -e '/^SET @@GLOBAL\.GTID_PURGED/d' \
-        -e '/^\/\*!80000 SET @@GLOBAL\.GTID_PURGED/d' \
-        -e '/^SET @@SESSION\.GTID_NEXT/d' \
-        -e '/^SET @@SESSION\.SQL_LOG_BIN/d' \
-        -e '/^SET @MYSQLDUMP_TEMP_LOG_BIN/d' \
-        -e "/^'[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*:[0-9]/d"
+    printf '%s' "$1" | \
+        awk '
+            /^SET @@GLOBAL\.GTID_PURGED/ { skip=1 }
+            skip && /;/                  { skip=0; next }
+            skip                         { next }
+            /^SET @@SESSION\.SQL_LOG_BIN/         { next }
+            /^SET @MYSQLDUMP_TEMP_LOG_BIN/        { next }
+            /^SET @@SESSION\.GTID_NEXT/           { next }
+            /^\/\*!80000 SET @@GLOBAL\.GTID_PURGED/ { next }
+            { print }
+        ' | \
+        sed \
+            -e 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' \
+            -e 's/utf8mb4_0900_as_cs/utf8mb4_bin/g'
 }
 
 # assert_gtid_stripped: fail if pattern is still present after pipeline
@@ -343,6 +350,64 @@ assert_gtid_preserved "CREATE TABLE \`order\`" \
 assert_gtid_preserved "INSERT INTO \`order\`" \
     "GCS concat: INSERT from second dump is preserved" \
     "$GCS_TWO_DUMP"
+
+section "restore.sh GTID stripping - MySQL 8.0.45 bare-UUID continuation"
+
+# mysqldump 8.0.45 emits multi-line GTID_PURGED where the continuation line
+# starts directly with the UUID character (no leading single quote).
+# This was the root bug: the old sed regex required a leading ' and missed it.
+GTID_845_BARE="SET @MYSQLDUMP_TEMP_LOG_BIN = @@SESSION.SQL_LOG_BIN;
+SET @@SESSION.SQL_LOG_BIN= 0;
+SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ '151cadb2-8bc8-11ee-b411-42010a0201e4:1-36361440,
+a83c8264-a7e2-11ef-86dd-42010a02013f:1-99641484';
+CREATE TABLE \`account\` (\`id\` int NOT NULL, PRIMARY KEY (\`id\`));
+INSERT INTO \`account\` VALUES (1),(2);
+SET @@SESSION.SQL_LOG_BIN = @MYSQLDUMP_TEMP_LOG_BIN;"
+
+assert_gtid_stripped "MYSQLDUMP_TEMP_LOG_BIN" \
+    "8.0.45 bare-UUID: MYSQLDUMP_TEMP_LOG_BIN lines are stripped" \
+    "$GTID_845_BARE"
+assert_gtid_stripped "SQL_LOG_BIN= 0" \
+    "8.0.45 bare-UUID: SET @@SESSION.SQL_LOG_BIN=0 is stripped" \
+    "$GTID_845_BARE"
+assert_gtid_stripped "GTID_PURGED" \
+    "8.0.45 bare-UUID: SET @@GLOBAL.GTID_PURGED line is stripped" \
+    "$GTID_845_BARE"
+assert_gtid_stripped "a83c8264-a7e2-11ef-86dd-42010a02013f:1-99641484" \
+    "8.0.45 bare-UUID: bare UUID continuation line is stripped (root bug fix)" \
+    "$GTID_845_BARE"
+assert_gtid_preserved "CREATE TABLE" \
+    "8.0.45 bare-UUID: CREATE TABLE after GTID block is preserved" \
+    "$GTID_845_BARE"
+assert_gtid_preserved "INSERT INTO" \
+    "8.0.45 bare-UUID: INSERT after GTID block is preserved" \
+    "$GTID_845_BARE"
+
+section "restore.sh GTID stripping - 3+ UUID continuation lines"
+
+# When three or more GTID source UUIDs are present, mysqldump emits 3+ continuation
+# lines. The awk loop must consume all of them until the closing ';'.
+GTID_THREE_UUID="SET @@GLOBAL.GTID_PURGED=/*!80000 '+'*/ 'uuid1-1111-1111-1111-111111111111:1-10,
+uuid2-2222-2222-2222-222222222222:1-20,
+uuid3-3333-3333-3333-333333333333:1-30';
+CREATE TABLE \`t\` (\`id\` int NOT NULL);
+INSERT INTO \`t\` VALUES (99);"
+
+assert_gtid_stripped "uuid1-1111-1111-1111-111111111111:1-10" \
+    "3+ UUID: first continuation line is stripped" \
+    "$GTID_THREE_UUID"
+assert_gtid_stripped "uuid2-2222-2222-2222-222222222222:1-20" \
+    "3+ UUID: second continuation line is stripped" \
+    "$GTID_THREE_UUID"
+assert_gtid_stripped "uuid3-3333-3333-3333-333333333333:1-30" \
+    "3+ UUID: third continuation line is stripped" \
+    "$GTID_THREE_UUID"
+assert_gtid_preserved "CREATE TABLE" \
+    "3+ UUID: CREATE TABLE after multi-UUID block is preserved" \
+    "$GTID_THREE_UUID"
+assert_gtid_preserved "INSERT INTO" \
+    "3+ UUID: INSERT after multi-UUID block is preserved" \
+    "$GTID_THREE_UUID"
 
 section "update.sh help and unknown flags"
 assert_exit 0 "--help exits 0" "$UPDATE" --help

@@ -30,7 +30,7 @@ SQL_FILE=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        -u|--user)
+        -u | --user)
             DB_USER="$2"
             shift 2
             ;;
@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
             DB_USER="${1#*=}"
             shift
             ;;
-        -p|--password)
+        -p | --password)
             DB_PASS="$2"
             shift 2
             ;;
@@ -46,7 +46,7 @@ while [[ $# -gt 0 ]]; do
             DB_PASS="${1#*=}"
             shift
             ;;
-        -h|--host)
+        -h | --host)
             DB_HOST="$2"
             shift 2
             ;;
@@ -54,7 +54,7 @@ while [[ $# -gt 0 ]]; do
             DB_HOST="${1#*=}"
             shift
             ;;
-        -P|--port)
+        -P | --port)
             DB_PORT="$2"
             shift 2
             ;;
@@ -62,7 +62,7 @@ while [[ $# -gt 0 ]]; do
             DB_PORT="${1#*=}"
             shift
             ;;
-        -d|--database)
+        -d | --database)
             DB_NAME="$2"
             shift 2
             ;;
@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
             DB_NAME="${1#*=}"
             shift
             ;;
-        -f|--file)
+        -f | --file)
             SQL_FILE="$2"
             shift 2
             ;;
@@ -130,17 +130,21 @@ if grep -qE '^SET @@(GLOBAL\.GTID_PURGED|SESSION\.GTID_NEXT|SESSION\.SQL_LOG_BIN
 fi
 
 echo "Importing data..."
-pv -s "$FILE_SIZE" "$SQL_FILE" | \
-    sed \
-        -e '/^SET @@GLOBAL\.GTID_PURGED/d' \
-        -e '/^\/\*!80000 SET @@GLOBAL\.GTID_PURGED/d' \
-        -e '/^SET @@SESSION\.GTID_NEXT/d' \
-        -e '/^SET @@SESSION\.SQL_LOG_BIN/d' \
-        -e '/^SET @MYSQLDUMP_TEMP_LOG_BIN/d' \
-        -e "/^'[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*:[0-9]/d" \
+pv -s "$FILE_SIZE" "$SQL_FILE" \
+    | awk '
+    /^SET @@GLOBAL\.GTID_PURGED/ { skip=1 }
+    skip && /;/                  { skip=0; next }
+    skip                         { next }
+    /^SET @@SESSION\.SQL_LOG_BIN/         { next }
+    /^SET @MYSQLDUMP_TEMP_LOG_BIN/        { next }
+    /^SET @@SESSION\.GTID_NEXT/           { next }
+    /^\/\*!80000 SET @@GLOBAL\.GTID_PURGED/ { next }
+    { print }
+  ' \
+    | sed \
         -e 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' \
-        -e 's/utf8mb4_0900_as_cs/utf8mb4_bin/g' | \
-    mysql $MYSQL_OPTS "$DB_NAME"
+        -e 's/utf8mb4_0900_as_cs/utf8mb4_bin/g' \
+    | mysql $MYSQL_OPTS "$DB_NAME"
 
 if [ $? -eq 0 ]; then
     echo ""
