@@ -137,6 +137,7 @@ pv -s "$FILE_SIZE" "$SQL_FILE" | \
         -e '/^SET @@SESSION\.GTID_NEXT/d' \
         -e '/^SET @@SESSION\.SQL_LOG_BIN/d' \
         -e '/^SET @MYSQLDUMP_TEMP_LOG_BIN/d' \
+        -e "/^'[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*:[0-9]/d" \
         -e 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' \
         -e 's/utf8mb4_0900_as_cs/utf8mb4_bin/g' | \
     mysql $MYSQL_OPTS "$DB_NAME"

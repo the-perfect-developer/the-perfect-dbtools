@@ -24,7 +24,8 @@ _gtid_strip() {
         -e '/^\/\*!80000 SET @@GLOBAL\.GTID_PURGED/d' \
         -e '/^SET @@SESSION\.GTID_NEXT/d' \
         -e '/^SET @@SESSION\.SQL_LOG_BIN/d' \
-        -e '/^SET @MYSQLDUMP_TEMP_LOG_BIN/d'
+        -e '/^SET @MYSQLDUMP_TEMP_LOG_BIN/d' \
+        -e "/^'[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*-[0-9a-fA-F][0-9a-fA-F]*:[0-9]/d"
 }
 
 # assert_gtid_stripped: fail if pattern is still present after pipeline
@@ -262,6 +263,86 @@ assert_gtid_preserved "INSERT INTO" \
 assert_gtid_preserved "CHARACTER_SET_CLIENT" \
     "Clean dump: other SET statements are preserved unchanged" \
     "$CLEAN_DUMP"
+
+section "restore.sh GTID stripping - Google Cloud SQL multi-line format"
+
+# Google Cloud SQL / MySQL 8 produces a three-line GTID block:
+#   Line 1: /*!80000 SET @@GLOBAL.GTID_PURGED=/*!*/;   (versioned comment sentinel)
+#   Line 2: SET @@GLOBAL.GTID_PURGED= '+               (assignment with continuation)
+#   Line 3: 'UUID:1-N';                                (bare quoted UUID range)
+# Rules 1 and 2 strip lines 1 and 2. Line 3 leaked through before this fix.
+GCS_SINGLE="/*!80000 SET @@GLOBAL.GTID_PURGED=/*!*/;
+SET @@GLOBAL.GTID_PURGED= '+
+'a83c8264-a7e2-11ef-86dd-42010a02013f:1-99641484';
+
+--
+-- Table structure for table \`account\`
+--
+CREATE TABLE \`account\` (\`id\` int NOT NULL, PRIMARY KEY (\`id\`));
+INSERT INTO \`account\` VALUES (1),(2);"
+
+assert_gtid_stripped "GTID_PURGED" \
+    "GCS multi-line: versioned comment GTID_PURGED line is stripped" \
+    "$GCS_SINGLE"
+assert_gtid_stripped "GTID_PURGED= '+" \
+    "GCS multi-line: SET GTID_PURGED continuation line is stripped" \
+    "$GCS_SINGLE"
+assert_gtid_stripped "a83c8264-a7e2-11ef-86dd-42010a02013f:1-99641484" \
+    "GCS multi-line: bare UUID continuation line is stripped" \
+    "$GCS_SINGLE"
+assert_gtid_preserved "-- Table structure for table" \
+    "GCS multi-line: SQL comment header after GTID block is preserved" \
+    "$GCS_SINGLE"
+assert_gtid_preserved "CREATE TABLE" \
+    "GCS multi-line: CREATE TABLE after GTID block is preserved" \
+    "$GCS_SINGLE"
+assert_gtid_preserved "INSERT INTO" \
+    "GCS multi-line: INSERT after GTID block is preserved" \
+    "$GCS_SINGLE"
+
+section "restore.sh GTID stripping - Google Cloud SQL concatenated two-dump format"
+
+# When two GCS dumps are concatenated, two three-line GTID blocks appear —
+# one per dump header. Both UUID continuation lines must be stripped, and
+# the SQL between them (and after the second block) must be fully intact.
+GCS_TWO_DUMP="/*!80000 SET @@GLOBAL.GTID_PURGED=/*!*/;
+SET @@GLOBAL.GTID_PURGED= '+
+'a83c8264-a7e2-11ef-86dd-42010a02013f:1-99641484';
+
+--
+-- Table structure for table \`account\`
+--
+CREATE TABLE \`account\` (\`id\` int NOT NULL, PRIMARY KEY (\`id\`));
+INSERT INTO \`account\` VALUES (1),(2);
+
+/*!80000 SET @@GLOBAL.GTID_PURGED=/*!*/;
+SET @@GLOBAL.GTID_PURGED= '+
+'a83c8264-a7e2-11ef-86dd-42010a02013f:1-99641486';
+
+--
+-- Table structure for table \`order\`
+--
+CREATE TABLE \`order\` (\`id\` int NOT NULL, PRIMARY KEY (\`id\`));
+INSERT INTO \`order\` VALUES (10),(20);"
+
+assert_gtid_stripped "a83c8264-a7e2-11ef-86dd-42010a02013f:1-99641484" \
+    "GCS concat: first dump UUID continuation line is stripped" \
+    "$GCS_TWO_DUMP"
+assert_gtid_stripped "a83c8264-a7e2-11ef-86dd-42010a02013f:1-99641486" \
+    "GCS concat: second dump UUID continuation line is stripped" \
+    "$GCS_TWO_DUMP"
+assert_gtid_preserved "CREATE TABLE \`account\`" \
+    "GCS concat: CREATE TABLE from first dump is preserved" \
+    "$GCS_TWO_DUMP"
+assert_gtid_preserved "INSERT INTO \`account\`" \
+    "GCS concat: INSERT from first dump is preserved" \
+    "$GCS_TWO_DUMP"
+assert_gtid_preserved "CREATE TABLE \`order\`" \
+    "GCS concat: CREATE TABLE from second dump is preserved" \
+    "$GCS_TWO_DUMP"
+assert_gtid_preserved "INSERT INTO \`order\`" \
+    "GCS concat: INSERT from second dump is preserved" \
+    "$GCS_TWO_DUMP"
 
 section "update.sh help and unknown flags"
 assert_exit 0 "--help exits 0" "$UPDATE" --help
