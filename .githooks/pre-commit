@@ -1,0 +1,145 @@
+#!/bin/bash
+# .githooks/pre-commit
+#
+# Runs ShellCheck and bash syntax validation on staged .sh files.
+# Mirrors the lint + syntax jobs in CI.
+#
+# Install: ./install-hooks.sh
+
+set -uo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
+NC='\033[0m'
+
+PASS=0
+FAIL=0
+
+print_header() {
+    echo -e "\n${CYAN}┌─ pre-commit ──────────────────────────────────────────────────┐${NC}"
+    echo -e "${CYAN}│${NC} dbtools quality gate"
+    echo -e "${CYAN}└───────────────────────────────────────────────────────────────┘${NC}"
+}
+
+print_step() { echo -e "\n${DIM}▶${NC} ${1}"; }
+print_pass() { echo -e "  ${GREEN}✓${NC} ${1}"; ((PASS++)); }
+print_fail() { echo -e "  ${RED}✗${NC} ${1}"; ((FAIL++)); }
+print_skip() { echo -e "  ${YELLOW}⊘${NC} ${1} ${DIM}(skipped — not installed)${NC}"; }
+
+print_summary() {
+    echo ""
+    if [ "$FAIL" -eq 0 ]; then
+        echo -e "${GREEN}✓ All checks passed${NC} ${DIM}(${PASS} passed, 0 failed)${NC}"
+    else
+        echo -e "${RED}✗ ${FAIL} check(s) failed${NC} ${DIM}(${PASS} passed)${NC}"
+        echo -e "${DIM}  Fix the issues above, then: git add <files> && git commit${NC}"
+    fi
+    echo ""
+}
+
+# Get staged .sh files (added/modified/copied, not deleted)
+STAGED_SH_FILES=()
+while IFS= read -r -d '' file; do
+    STAGED_SH_FILES+=("$file")
+done < <(git diff --cached --name-only --diff-filter=ACM -z | grep -z '\.sh$' || true)
+
+# Early exit if nothing to check
+if [ "${#STAGED_SH_FILES[@]}" -eq 0 ]; then
+    echo -e "${DIM}pre-commit: no .sh files staged, skipping checks${NC}"
+    exit 0
+fi
+
+print_header
+
+echo -e "\n${DIM}Staged bash files:${NC}"
+for f in "${STAGED_SH_FILES[@]}"; do
+    echo -e "  ${DIM}•${NC} $f"
+done
+
+# ── Check 1: bash syntax ──────────────────────────────────────────────────────
+print_step "Bash syntax check (bash -n)"
+
+syntax_errors=0
+for file in "${STAGED_SH_FILES[@]}"; do
+    if bash -n "$file" 2>/tmp/bash_syntax_error_$$; then
+        print_pass "$file"
+    else
+        print_fail "$file"
+        echo -e "    ${RED}$(cat /tmp/bash_syntax_error_$$)${NC}"
+        ((syntax_errors++))
+    fi
+done
+rm -f /tmp/bash_syntax_error_$$
+
+if [ "$syntax_errors" -gt 0 ]; then
+    echo -e "\n${RED}Aborting: fix syntax errors before ShellCheck can run.${NC}"
+    print_summary
+    exit 1
+fi
+
+# ── Check 2: ShellCheck ───────────────────────────────────────────────────────
+print_step "ShellCheck (severity: error)"
+
+if ! command -v shellcheck &>/dev/null; then
+    print_skip "shellcheck"
+    echo -e "    ${YELLOW}Install: sudo apt install shellcheck  OR  brew install shellcheck${NC}"
+else
+    for file in "${STAGED_SH_FILES[@]}"; do
+        # SC1090: can't follow non-constant source — expected in this codebase
+        if shellcheck --severity=error --shell=bash --exclude=SC1090 "$file" 2>/tmp/shellcheck_out_$$; then
+            print_pass "$file"
+        else
+            print_fail "$file"
+            while IFS= read -r line; do
+                echo -e "    ${DIM}${line}${NC}"
+            done < /tmp/shellcheck_out_$$
+        fi
+    done
+    rm -f /tmp/shellcheck_out_$$
+fi
+
+# ── Check 3: shfmt ────────────────────────────────────────────────────────────
+print_step "Shell format check (shfmt)"
+
+if ! command -v shfmt &>/dev/null; then
+    print_skip "shfmt"
+    echo -e "    ${YELLOW}Install: brew install shfmt  OR  go install mvdan.cc/sh/v3/cmd/shfmt@latest${NC}"
+else
+    for file in "${STAGED_SH_FILES[@]}"; do
+        if shfmt -i 4 -ci -bn -d "$file" &>/tmp/shfmt_out_$$; then
+            print_pass "$file"
+        else
+            print_fail "$file"
+            echo -e "    ${YELLOW}Run: shfmt -i 4 -ci -bn -w $file${NC}"
+            head -10 /tmp/shfmt_out_$$ | while IFS= read -r line; do
+                echo -e "    ${DIM}${line}${NC}"
+            done
+        fi
+    done
+    rm -f /tmp/shfmt_out_$$
+fi
+
+# ── Check 4: @description annotation ─────────────────────────────────────────
+print_step "@description annotation (scripts/ only)"
+
+for file in "${STAGED_SH_FILES[@]}"; do
+    if [[ "$file" == scripts/* ]] && [ -f "$file" ]; then
+        if grep -q "^# @description" "$file"; then
+            print_pass "$file has @description"
+        else
+            print_fail "$file missing '# @description' — required for auto-discovery"
+        fi
+    fi
+done
+
+# ── Summary ───────────────────────────────────────────────────────────────────
+print_summary
+
+if [ "$FAIL" -gt 0 ]; then
+    exit 1
+fi
+
+exit 0

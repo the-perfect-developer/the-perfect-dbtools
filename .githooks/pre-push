@@ -1,0 +1,41 @@
+#!/bin/bash
+# .githooks/pre-push
+#
+# Runs the full no-DB test suite before pushing to remote.
+# Calls tests/run-tests.sh — single source of truth shared with CI.
+#
+# Install: ./install-hooks.sh
+
+set -uo pipefail
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+DIM='\033[2m'
+NC='\033[0m'
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+TEST_SCRIPT="$REPO_ROOT/tests/run-tests.sh"
+
+echo -e "\n${CYAN}┌─ pre-push ────────────────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC} dbtools full test suite"
+echo -e "${CYAN}└───────────────────────────────────────────────────────────────┘${NC}\n"
+
+if [ ! -f "$TEST_SCRIPT" ]; then
+    echo -e "${RED}✗ Test suite not found: $TEST_SCRIPT${NC}"
+    echo -e "${DIM}  Run from the repo root, or check that tests/run-tests.sh exists${NC}"
+    exit 1
+fi
+
+bash "$TEST_SCRIPT" "$REPO_ROOT"
+EXIT_CODE=$?
+
+if [ "$EXIT_CODE" -ne 0 ]; then
+    echo ""
+    echo -e "${RED}Push blocked — fix failing tests before pushing.${NC}"
+    echo -e "${YELLOW}To push anyway (emergency only): git push --no-verify${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}All tests passed. Proceeding with push.${NC}\n"
+exit 0
