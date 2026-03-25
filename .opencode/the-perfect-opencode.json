@@ -1,0 +1,8 @@
+{
+  "schema_version": "1",
+  "installed_at": "2026-03-25T04:39:13Z",
+  "mode": "core",
+  "agents": ["code-analyst", "database-architect", "developer-fast", "developer-prime", "devops-engineer", "orchestrix", "performance-engineer", "principal-architect", "security-expert", "solution-architect", "test-engineer", "ui-ux-designer"],
+  "skills": ["agent-configuration", "command-creation", "conventional-git-commit", "interactive-questions", "perfectcode-zen-evaluation", "perfectcode-zen-ideation", "perfectcode-zen-implement", "perfectcode-zen-plan", "skill-creation"],
+  "commands": ["create-agent", "create-command", "create-rule", "create-skill", "evaluate", "git-commit", "git-push", "ideate", "implement", "install-perfect-tools", "plan", "recommend-perfect-tool", "sync-perfect-configs", "update-perfect-tools"]
+}

@@ -1,4 +1,4 @@
-# db-tools
+# the-perfect-dbtools
 
 ```
      _ _     _              _     
@@ -14,7 +14,7 @@ By Dilan D Chandrajith - The Perfect Developer
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Bash](https://img.shields.io/badge/Shell-Bash-green.svg)](https://www.gnu.org/software/bash/)
 [![MySQL](https://img.shields.io/badge/Database-MySQL-orange.svg)](https://www.mysql.com/)
-[![Maintenance](https://img.shields.io/badge/Maintained-yes-brightgreen.svg)](https://github.com/the-perfect-developer/db_tools/commits/main)
+[![Maintenance](https://img.shields.io/badge/Maintained-yes-brightgreen.svg)](https://github.com/the-perfect-developer/the-perfect-dbtools/commits/main)
 
 Bash scripts for dumping and restoring MySQL databases with progress tracking and resume support.
 
@@ -47,7 +47,7 @@ brew install mysql-client pv
 ### Quick Install (Recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/the-perfect-developer/db_tools/main/get.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/the-perfect-developer/the-perfect-dbtools/main/get.sh | sudo bash
 ```
 
 This installs dbtools to `/opt/dbtools` and creates a symlink in `/usr/local/bin`.
@@ -63,8 +63,8 @@ sudo rm -rf /opt/dbtools /usr/local/bin/dbtools
 Clone the repository and install manually:
 
 ```bash
-git clone https://github.com/the-perfect-developer/db_tools.git
-cd db_tools
+git clone https://github.com/the-perfect-developer/the-perfect-dbtools.git
+cd the-perfect-dbtools
 sudo ./install.sh --install
 ```
 
