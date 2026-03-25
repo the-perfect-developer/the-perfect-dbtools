@@ -32,7 +32,11 @@ _gtid_strip() {
         ' | \
         sed \
             -e 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' \
-            -e 's/utf8mb4_0900_as_cs/utf8mb4_bin/g'
+            -e 's/utf8mb4_0900_as_cs/utf8mb4_bin/g' \
+            -e 's/CREATE DEFINER=`[^`]*`@`[^`]*` PROCEDURE/CREATE PROCEDURE/g' \
+            -e 's/CREATE DEFINER=`[^`]*`@`[^`]*` FUNCTION/CREATE FUNCTION/g' \
+            -e 's/\/\*!5[0-9][0-9][0-9][0-9] DEFINER=`[^`]*`@`[^`]*`\*\/ //g' \
+            -e 's/\/\*!50013 DEFINER=`[^`]*`@`[^`]*` SQL SECURITY DEFINER \*\//\/\*!50013 SQL SECURITY INVOKER \*\//g'
 }
 
 # assert_gtid_stripped: fail if pattern is still present after pipeline
@@ -408,6 +412,203 @@ assert_gtid_preserved "CREATE TABLE" \
 assert_gtid_preserved "INSERT INTO" \
     "3+ UUID: INSERT after multi-UUID block is preserved" \
     "$GTID_THREE_UUID"
+
+section "restore.sh DEFINER stripping - PROCEDURE and FUNCTION"
+
+DEFINER_PROC='-- Routine DDL
+CREATE DEFINER=`root`@`%` PROCEDURE `transfer_funds`(IN amount INT)
+BEGIN
+  UPDATE accounts SET balance = balance - amount;
+END;;
+CREATE TABLE `accounts` (`id` int NOT NULL, `balance` int);'
+
+assert_gtid_stripped 'DEFINER=`root`@`%` PROCEDURE' \
+    'PROCEDURE: DEFINER clause is stripped from CREATE PROCEDURE' \
+    "$DEFINER_PROC"
+assert_gtid_preserved 'PROCEDURE `transfer_funds`' \
+    'PROCEDURE: PROCEDURE name is preserved after DEFINER strip' \
+    "$DEFINER_PROC"
+assert_gtid_preserved 'UPDATE accounts SET balance' \
+    'PROCEDURE: procedure body is preserved after DEFINER strip' \
+    "$DEFINER_PROC"
+assert_gtid_preserved 'CREATE TABLE `accounts`' \
+    'PROCEDURE: CREATE TABLE after procedure is preserved' \
+    "$DEFINER_PROC"
+
+DEFINER_FUNC='CREATE DEFINER=`app_user`@`localhost` FUNCTION `calculate_tax`(price DECIMAL(10,2)) RETURNS DECIMAL(10,2)
+BEGIN
+  RETURN price * 0.2;
+END;;
+INSERT INTO `config` VALUES (1,'"'"'tax'"'"',0.2);'
+
+assert_gtid_stripped 'DEFINER=`app_user`@`localhost` FUNCTION' \
+    'FUNCTION: DEFINER clause is stripped from CREATE FUNCTION' \
+    "$DEFINER_FUNC"
+assert_gtid_preserved 'FUNCTION `calculate_tax`' \
+    'FUNCTION: FUNCTION name is preserved after DEFINER strip' \
+    "$DEFINER_FUNC"
+assert_gtid_preserved 'RETURN price * 0.2' \
+    'FUNCTION: function body is preserved after DEFINER strip' \
+    "$DEFINER_FUNC"
+assert_gtid_preserved 'INSERT INTO `config`' \
+    'FUNCTION: INSERT after FUNCTION DDL is preserved' \
+    "$DEFINER_FUNC"
+
+DEFINER_PROC_NONROOT='CREATE DEFINER=`deploy_svc`@`10.0.0.1` PROCEDURE `archive_old`()
+BEGIN
+  DELETE FROM logs WHERE created_at < NOW() - INTERVAL 90 DAY;
+END;;'
+
+assert_gtid_stripped 'DEFINER=`deploy_svc`@`10.0.0.1`' \
+    'PROCEDURE: non-root IP-format host DEFINER is stripped' \
+    "$DEFINER_PROC_NONROOT"
+
+section "restore.sh DEFINER stripping - TRIGGER versioned comment"
+
+DEFINER_TRIGGER='/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`%`*/ /*!50003 TRIGGER `audit_insert` AFTER INSERT ON `users` FOR EACH ROW BEGIN INSERT INTO audit_log VALUES (NEW.id, NOW()); END */;;
+CREATE TABLE `users` (`id` int NOT NULL);
+INSERT INTO `users` VALUES (1);'
+
+assert_gtid_stripped '/*!50017 DEFINER=`root`@`%`*/' \
+    'TRIGGER: /*!50017 DEFINER=...*/ versioned comment is stripped' \
+    "$DEFINER_TRIGGER"
+assert_gtid_preserved '/*!50003 CREATE*/' \
+    'TRIGGER: /*!50003 CREATE*/ is preserved after DEFINER strip' \
+    "$DEFINER_TRIGGER"
+assert_gtid_preserved '/*!50003 TRIGGER `audit_insert`' \
+    'TRIGGER: TRIGGER name and body comment are preserved' \
+    "$DEFINER_TRIGGER"
+assert_gtid_preserved 'CREATE TABLE `users`' \
+    'TRIGGER: CREATE TABLE after TRIGGER DDL is preserved' \
+    "$DEFINER_TRIGGER"
+assert_gtid_preserved 'INSERT INTO `users`' \
+    'TRIGGER: INSERT after TRIGGER DDL is preserved' \
+    "$DEFINER_TRIGGER"
+
+DEFINER_TRIGGER_NONROOT='/*!50003 CREATE*/ /*!50017 DEFINER=`replication_user`@`192.168.1.1`*/ /*!50003 TRIGGER `sync_log` AFTER UPDATE ON `orders` FOR EACH ROW BEGIN INSERT INTO sync_queue VALUES (NEW.id); END */;;'
+
+assert_gtid_stripped 'DEFINER=`replication_user`@`192.168.1.1`' \
+    'TRIGGER: non-root IP-host DEFINER in versioned comment is stripped' \
+    "$DEFINER_TRIGGER_NONROOT"
+
+section "restore.sh DEFINER stripping - EVENT versioned comment"
+
+DEFINER_EVENT='/*!50106 CREATE*/ /*!50117 DEFINER=`root`@`%`*/ /*!50106 EVENT `daily_cleanup` ON SCHEDULE EVERY 1 DAY DO DELETE FROM temp_data WHERE created_at < NOW() - INTERVAL 7 DAY */;;
+CREATE TABLE `temp_data` (`id` int NOT NULL, `created_at` datetime);
+INSERT INTO `temp_data` VALUES (1, NOW());'
+
+assert_gtid_stripped '/*!50117 DEFINER=`root`@`%`*/' \
+    'EVENT: /*!50117 DEFINER=...*/ versioned comment is stripped' \
+    "$DEFINER_EVENT"
+assert_gtid_preserved '/*!50106 CREATE*/' \
+    'EVENT: /*!50106 CREATE*/ is preserved after DEFINER strip' \
+    "$DEFINER_EVENT"
+assert_gtid_preserved '/*!50106 EVENT `daily_cleanup`' \
+    'EVENT: EVENT name and body comment are preserved' \
+    "$DEFINER_EVENT"
+assert_gtid_preserved 'CREATE TABLE `temp_data`' \
+    'EVENT: CREATE TABLE after EVENT DDL is preserved' \
+    "$DEFINER_EVENT"
+assert_gtid_preserved 'INSERT INTO `temp_data`' \
+    'EVENT: INSERT after EVENT DDL is preserved' \
+    "$DEFINER_EVENT"
+
+DEFINER_TRIGGER_EVENT_MIX='/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`%`*/ /*!50003 TRIGGER `t1` AFTER INSERT ON `a` FOR EACH ROW BEGIN END */;;
+/*!50106 CREATE*/ /*!50117 DEFINER=`root`@`%`*/ /*!50106 EVENT `e1` ON SCHEDULE EVERY 1 DAY DO SELECT 1 */;;'
+
+assert_gtid_preserved '/*!50106 CREATE*/' \
+    'EVENT: /*!50106 CREATE*/ on next line after TRIGGER strip is preserved' \
+    "$DEFINER_TRIGGER_EVENT_MIX"
+
+section "restore.sh DEFINER stripping - VIEW SQL SECURITY rewrite"
+
+DEFINER_VIEW='-- View structure for view `active_users`
+/*!50001 DROP VIEW IF EXISTS `active_users`*/;
+/*!50013 DEFINER=`root`@`%` SQL SECURITY DEFINER */
+/*!50001 VIEW `active_users` AS SELECT id, name FROM users WHERE active = 1 */;
+CREATE TABLE `users` (`id` int NOT NULL, `name` varchar(100), `active` tinyint);'
+
+assert_gtid_stripped 'DEFINER=`root`@`%` SQL SECURITY DEFINER' \
+    'VIEW: DEFINER=...SQL SECURITY DEFINER content is stripped' \
+    "$DEFINER_VIEW"
+assert_gtid_preserved 'SQL SECURITY INVOKER' \
+    'VIEW: SQL SECURITY INVOKER is present after rewrite' \
+    "$DEFINER_VIEW"
+assert_gtid_preserved '/*!50013' \
+    'VIEW: /*!50013 versioned comment wrapper is preserved' \
+    "$DEFINER_VIEW"
+assert_gtid_preserved '/*!50001 VIEW `active_users`' \
+    'VIEW: VIEW DDL after DEFINER rewrite is preserved' \
+    "$DEFINER_VIEW"
+assert_gtid_preserved '/*!50001 DROP VIEW IF EXISTS' \
+    'VIEW: DROP VIEW before DEFINER line is preserved' \
+    "$DEFINER_VIEW"
+assert_gtid_preserved 'CREATE TABLE `users`' \
+    'VIEW: CREATE TABLE after VIEW DDL is preserved' \
+    "$DEFINER_VIEW"
+
+DEFINER_VIEW_INVOKER='/*!50013 SQL SECURITY INVOKER */
+/*!50001 VIEW `safe_view` AS SELECT id FROM users */;'
+
+assert_gtid_preserved 'SQL SECURITY INVOKER' \
+    'VIEW: already-INVOKER line is preserved unchanged (idempotent)' \
+    "$DEFINER_VIEW_INVOKER"
+
+DEFINER_VIEW_NONROOT='/*!50013 DEFINER=`ashen`@`%` SQL SECURITY DEFINER */
+/*!50001 VIEW `summary` AS SELECT COUNT(*) FROM orders */;'
+
+assert_gtid_stripped 'DEFINER=`ashen`@`%`' \
+    'VIEW: non-root DEFINER user is stripped from SQL SECURITY line' \
+    "$DEFINER_VIEW_NONROOT"
+
+section "restore.sh DEFINER stripping - edge cases"
+
+DEFINER_MIXED='/*!50013 DEFINER=`root`@`%` SQL SECURITY DEFINER */
+/*!50001 VIEW `v1` AS SELECT 1 */;
+/*!50003 CREATE*/ /*!50017 DEFINER=`root`@`%`*/ /*!50003 TRIGGER `t1` AFTER INSERT ON `t` FOR EACH ROW BEGIN END */;;
+/*!50106 CREATE*/ /*!50117 DEFINER=`root`@`%`*/ /*!50106 EVENT `e1` ON SCHEDULE EVERY 1 DAY DO SELECT 1 */;;
+CREATE DEFINER=`root`@`%` PROCEDURE `p1`() BEGIN SELECT 1; END;;
+CREATE TABLE `t` (`id` int NOT NULL);'
+
+assert_gtid_stripped 'DEFINER=`root`@`%` SQL SECURITY DEFINER' \
+    'MIXED: VIEW DEFINER is stripped in multi-type dump' \
+    "$DEFINER_MIXED"
+assert_gtid_stripped '/*!50017 DEFINER=`root`@`%`*/' \
+    'MIXED: TRIGGER DEFINER comment is stripped in multi-type dump' \
+    "$DEFINER_MIXED"
+assert_gtid_stripped '/*!50117 DEFINER=`root`@`%`*/' \
+    'MIXED: EVENT DEFINER comment is stripped in multi-type dump' \
+    "$DEFINER_MIXED"
+assert_gtid_stripped 'DEFINER=`root`@`%` PROCEDURE' \
+    'MIXED: PROCEDURE DEFINER is stripped in multi-type dump' \
+    "$DEFINER_MIXED"
+assert_gtid_preserved 'CREATE TABLE `t`' \
+    'MIXED: CREATE TABLE is preserved in multi-type dump' \
+    "$DEFINER_MIXED"
+
+DEFINER_WITH_GTID='SET @@GLOBAL.GTID_PURGED='"'"'abc123:1-5'"'"';
+CREATE DEFINER=`root`@`%` PROCEDURE `post_restore`() BEGIN UPDATE config SET val=1; END;;
+CREATE TABLE `config` (`val` int);'
+
+assert_gtid_stripped 'GTID_PURGED' \
+    'PIPELINE: GTID_PURGED is stripped before DEFINER sed stage' \
+    "$DEFINER_WITH_GTID"
+assert_gtid_stripped 'DEFINER=`root`@`%` PROCEDURE' \
+    'PIPELINE: PROCEDURE DEFINER is stripped after GTID awk stage' \
+    "$DEFINER_WITH_GTID"
+assert_gtid_preserved 'CREATE TABLE `config`' \
+    'PIPELINE: CREATE TABLE preserved through GTID+DEFINER pipeline' \
+    "$DEFINER_WITH_GTID"
+
+DEFINER_VIEW_COLLATION='/*!50013 DEFINER=`root`@`%` SQL SECURITY DEFINER */
+/*!50001 VIEW `v2` AS SELECT id FROM users WHERE name COLLATE utf8mb4_0900_ai_ci = '"'"'foo'"'"' */;'
+
+assert_gtid_stripped 'DEFINER=`root`@`%` SQL SECURITY DEFINER' \
+    'COLLATION+DEFINER: DEFINER is stripped even when VIEW body has collation' \
+    "$DEFINER_VIEW_COLLATION"
+assert_gtid_preserved 'utf8mb4_general_ci' \
+    'COLLATION+DEFINER: utf8mb4_0900_ai_ci rewritten to utf8mb4_general_ci alongside DEFINER strip' \
+    "$DEFINER_VIEW_COLLATION"
 
 section "update.sh help and unknown flags"
 assert_exit 0 "--help exits 0" "$UPDATE" --help

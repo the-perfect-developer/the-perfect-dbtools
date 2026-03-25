@@ -129,6 +129,13 @@ if grep -qE '^SET @@(GLOBAL\.GTID_PURGED|SESSION\.GTID_NEXT|SESSION\.SQL_LOG_BIN
     echo ""
 fi
 
+# Check for DEFINER statements and warn if present
+if grep -qE 'DEFINER=' "$SQL_FILE"; then
+    echo "⚠  Warning: Dump contains DEFINER clauses."
+    echo "   Stripping automatically for restore compatibility."
+    echo ""
+fi
+
 echo "Importing data..."
 pv -s "$FILE_SIZE" "$SQL_FILE" \
     | awk '
@@ -144,6 +151,10 @@ pv -s "$FILE_SIZE" "$SQL_FILE" \
     | sed \
         -e 's/utf8mb4_0900_ai_ci/utf8mb4_general_ci/g' \
         -e 's/utf8mb4_0900_as_cs/utf8mb4_bin/g' \
+        -e 's/CREATE DEFINER=`[^`]*`@`[^`]*` PROCEDURE/CREATE PROCEDURE/g' \
+        -e 's/CREATE DEFINER=`[^`]*`@`[^`]*` FUNCTION/CREATE FUNCTION/g' \
+        -e 's/\/\*!5[0-9][0-9][0-9][0-9] DEFINER=`[^`]*`@`[^`]*`\*\/ //g' \
+        -e 's/\/\*!50013 DEFINER=`[^`]*`@`[^`]*` SQL SECURITY DEFINER \*\//\/\*!50013 SQL SECURITY INVOKER \*\//g' \
     | mysql $MYSQL_OPTS "$DB_NAME"
 
 if [ $? -eq 0 ]; then
